@@ -1,0 +1,199 @@
+--1.CHECKING NUMBER OF COLUMNS IN EACH TABLE
+SELECT table_name,
+COUNT(column_name) AS number_of_columns
+FROM INFORMATION_SCHEMA.COLUMNS
+GROUP BY table_name
+ORDER BY table_name
+
+
+
+--2.CHECKING COLUMN NAMES
+SELECT column_name,
+table_name
+FROM INFORMATION_SCHEMA.COLUMNS
+--Takeaways: some column names are inconsistent
+
+
+
+--3.FORMATTING COLUMN NAMES
+--3.1.Activity table
+SELECT 
+  Id AS id,
+  ActivityDate AS date,
+  TotalSteps AS total_steps,
+  TotalDistance AS total_distance,
+  TrackerDistance AS tracker_distance,
+  LoggedActivitiesDistance AS logged_activities_distance,
+  VeryActiveDistance AS very_active_distance,
+  ModeratelyActiveDistance AS moderately_active_distance,
+  LightActiveDistance AS light_active_distance,
+  SedentaryActiveDistance AS sedentary_active_distance,
+  VeryActiveMinutes AS very_active_minutes,
+  FairlyActiveMinutes AS fairly_active_minutes,
+  LightlyActiveMinutes AS lightly_active_minutes,
+  SedentaryMinutes AS sedentary_minutes,
+  Calories AS calories
+INTO activity_v1
+FROM activity
+
+SELECT * FROM activity_v1
+
+--3.2.Weight table
+SELECT 
+Id AS id,
+Date AS date,
+WeightKg AS weight_kg,
+WeightPounds AS weight_pounds,
+Fat AS fat,
+BMI AS bmi,
+IsManualReport AS is_manual_report,
+LogId AS log_id
+INTO weight_v1
+FROM weight
+
+SELECT * FROM weight_v1
+
+--3.3.Sleep table
+SELECT 
+Id AS id,
+SleepDay AS date,
+TotalSleepRecords AS total_sleep_records,
+TotalMinutesAsleep AS total_minutes_asleep,
+TotalTimeInBed AS total_time_in_bed
+INTO sleep_v1
+FROM sleep
+
+SELECT * FROM sleep_v1
+
+--Takeaways: we will continue our cleaning with 3 new tables activity_v1, weight_v1, and sleep_v1
+
+
+
+--4.COUNTING DISTINCT IDs IN THESE 3 TABLES
+SELECT COUNT(DISTINCT id) AS distinct_id_activity
+FROM activity_v1
+
+SELECT COUNT(DISTINCT id) AS distinct_id_sleep
+FROM sleep_v1
+
+SELECT COUNT(DISTINCT id) AS distinct_id_weight
+FROM weight_v1
+
+--Takeaways:
+----There are 24 distinct records in the sleep dataset, only 8 in the weight dataset. 
+----With that said, 8 participants may not be significant enough to generate recomendations to our business goals.
+----The numbers identified above show that there are 33 participants in activity dataset.
+
+
+
+--5.CHECKING WHICH COLUMN NAMES ARE SHARED ACROSS THESE 3 TABLES
+--In other words, we check the requency of each column name and it turns out that id is the most common column
+SELECT
+ column_name,
+ COUNT(table_name) AS frequency
+FROM INFORMATION_SCHEMA.COLUMNS
+GROUP BY column_name
+ORDER BY frequency DESC
+--Takeaways: id is the most common column.
+
+
+--After we figure out that Id was a common column, let's make sure that id is in every table we have
+SELECT table_name,
+ SUM(CASE
+ WHEN column_name = 'id' THEN 1
+   ELSE
+   0
+ END
+   ) AS has_id_column
+FROM INFORMATION_SCHEMA.COLUMNS
+GROUP BY table_name
+ORDER BY table_name
+--Takeaways: id is possibly the key to link these 3 tables.
+
+
+--6.DETERMINING WHICH TABLES HAVE DATE/TIMESTAMP RELATED DATA TYPE
+-- If we found that we have columns of the type DATETIME, TIMESTAMP, or DATE we can use this query to check for their names
+SELECT
+ CONCAT(table_catalog,'.',table_schema,'.',table_name) AS table_path,
+ table_name,
+ column_name,
+ data_type
+FROM INFORMATION_SCHEMA.COLUMNS
+WHERE
+ data_type IN ('TIMESTAMP', 'DATETIME','DATE')
+--Takeaways: date columns in all 3 tables have DATE as the data type
+
+
+
+--7.FINDING DUPLICATE VALUES IN THE DATASETS
+--7.1.Activity table
+SELECT 
+id,
+date,
+COUNT(*)
+FROM activity_v1
+GROUP BY id, date
+HAVING COUNT(*) > 1
+
+--7.2.Weight table
+SELECT 
+id,
+date,
+COUNT(*)
+FROM weight_v1
+GROUP BY id, date
+HAVING COUNT(*) > 1
+
+--7.3.Sleep table
+SELECT 
+id,
+date,
+COUNT(*)
+FROM sleep_v1
+GROUP BY id, date
+HAVING COUNT(*) > 1
+
+--Takeaways: tables activity and weight do not have any duplicated values when there are 3 duplicated values in table sleep
+
+
+
+--8.REMOVING AND RECHECKING DUPLICATED VALUES IN SLEEP TABLE
+WITH CTE(id, date, 
+    duplicatecount)
+AS (SELECT id, date, 
+           ROW_NUMBER() OVER(PARTITION BY id, date
+           ORDER BY id) AS duplicatecount
+    FROM sleep_v1)
+DELETE FROM CTE
+WHERE DuplicateCount > 1;
+SELECT * FROM sleep_v1;
+--Takeaways: number of observations in sleep table reduces from 413 to 410.
+
+
+
+--9.JOINING SLEEP AND ACTIVITY TABLES, AND THEN CREATING 2 NEW CATEGORICAL VARIABLES FOR THE JOIN TABLE
+WITH t1 AS (SELECT  
+  a.*,
+  s.total_sleep_records, s.total_minutes_asleep,s.total_time_in_bed
+FROM activity_v1 a
+RIGHT JOIN
+sleep_v1 s
+ON a.id = s.id
+AND a.date = s.date)
+SELECT *,
+CASE
+  WHEN total_minutes_asleep/60 < 7 THEN 'Insufficient'
+  WHEN total_minutes_asleep/60 >= 7 AND total_minutes_asleep/60 <= 9 THEN 'Sufficient'
+  ELSE 'Oversleeping'
+END AS sleep_quality,
+CASE
+  WHEN total_steps < 5000 THEN 'Sedentary'
+  WHEN total_steps >=5000 AND total_steps < 7500 THEN 'Low active'
+  WHEN total_steps >=7500 AND total_steps < 10000 THEN 'Somewhat active'
+  WHEN total_steps >=10000 AND total_steps < 12500 THEN 'Active'
+  WHEN total_steps >=12500 THEN 'Highly active'
+END AS user_type
+FROM t1;
+--Takeaways: there are 410 rows of 20 columns in the joining table which we will be using to perform data wrangling and data visualization.
+
+
